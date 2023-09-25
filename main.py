@@ -11,7 +11,7 @@ from bson.errors import InvalidId
 app = FastAPI()
 
 #Database connection
-client = MongoClient("mongodb+srv://bikash:incorrect@cloud.jwcitcy.mongodb.net/")
+client = MongoClient("mongodb+srv://bikash:*********@cloud.jwcitcy.mongodb.net/")
 db = client["ecommerce"]
 products_collection: Collection = db["products"]
 orders_collection: Collection = db["orders"]
