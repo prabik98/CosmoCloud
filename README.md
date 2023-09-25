@@ -33,16 +33,26 @@ This is a simple e-commerce application built using FastAPI, a modern, fast (hig
    You can interact with the APIs using tools like curl, Postman, or any REST API client.
 
 6. **API Endpoints**
+   
    List All Products:   GET /products
+   
    Add New Product:   POST /products
+   
    Create a New Order:   POST /orders
+   
    Update Product Quantity:   PUT /products/{product_id}
+   
    Fetch All Orders (with pagination support):   GET /orders
+   
    Fetch Single Order by Order ID:   GET /orders/{order_id}
    
-7. Acknowledgments
+8. Acknowledgments
+   
    FastAPI
+   
    MongoDB
+   
    Pydantic
+
    bson
 
