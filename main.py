@@ -1,63 +1,70 @@
-from fastapi import FastAPI, HTTPException, Query, Path
+from fastapi import FastAPI, HTTPException, Query, Path, Body, status
+from fastapi.responses import Response, JSONResponse
+from fastapi.encoders import jsonable_encoder
 from pymongo import MongoClient
 from pymongo.collection import Collection
 from typing import List
-from models.product import Product, Order
+from models.product import Product, Order, UpdateProduct
 from bson import ObjectId
 from bson.errors import InvalidId
 
 app = FastAPI()
 
+#Database connection
 client = MongoClient("mongodb+srv://bikash:incorrect@cloud.jwcitcy.mongodb.net/")
 db = client["ecommerce"]
 products_collection: Collection = db["products"]
 orders_collection: Collection = db["orders"]
 
+
 @app.get("/products", response_model=List[Product])
 def list_products():
     products = list(products_collection.find())
-    get_products = [{"id": str(product["_id"]), **product} for product in products]
+    get_products = [product for product in products]
     return get_products
 
 @app.post("/products", response_model=Product)
 def create_product(product: Product):
-    new_product = product.dict()
-    product_id = products_collection.insert_one(new_product).inserted_id
-    created_product = {**new_product, "id": str(product_id)}
-    return created_product
+    product = jsonable_encoder(product)
+    del product['_id']
+    new_product = products_collection.insert_one(product)
+    product_added = products_collection.find_one({"_id":new_product.inserted_id})
+    product_added['_id']=str(product_added['_id'])
+    return JSONResponse(status_code=status.HTTP_201_CREATED, content=product_added)
 
 @app.put("/products/{product_id}", response_model=Product, response_model_exclude_unset=True)
-def update_product(product_id: str, product: Product):
-    # Ensure the provided product_id is a valid ObjectId
+def update_product(product_id: str, product: UpdateProduct):
+    #product_id is valid ObjectId
     try:
         product_id_obj = ObjectId(product_id)
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid product ID")
 
-    # Find the product in the database
+    #Find product in database
     existing_product = products_collection.find_one({"_id": product_id_obj})
 
     if not existing_product:
         raise HTTPException(status_code=404, detail="Product not found")
 
-    # Update the available quantity
-    updated_quantity = product.available_quantity
+    #Update available quantity
+    product={key: value for key, value in product.dict().items() if value is not None}
     products_collection.update_one(
         {"_id": product_id_obj},
-        {"$set": {"available_quantity": updated_quantity}}
+        {"$set": product}
     )
-    # Return the updated product
-    updated_product = {**existing_product, "id": product_id, "available_quantity": updated_quantity}
+    #Return updated product
+    updated_product = products_collection.find_one({"_id":product_id_obj})
+    updated_product["_id"] = str(updated_product["_id"])
     return updated_product
 
 @app.get("/orders", response_model=List[Order])
 def get_orders(skip: int = Query(0, description="Number of records to skip"),
-               limit: int = Query(10, description="Number of records to fetch")):
-    #skip and limit are non-negative
+               limit: int = Query(3, description="Number of records to fetch")):
+    #validation
     if skip < 0 or limit < 0:
         raise HTTPException(status_code=400, detail="Skip and limit must be non-negative")
 
-    #Fetch orders from the database with pagination
+    #Fetch orders with pagination
     orders = list(orders_collection.find().skip(skip).limit(limit))
 
     if not orders:
@@ -66,27 +73,29 @@ def get_orders(skip: int = Query(0, description="Number of records to skip"),
 
 @app.get("/orders/{order_id}", response_model=Order)
 def get_order(order_id: str = Path(..., description="Order ID")):
-    # Ensure the provided order_id is a valid ObjectId
+    #valid ObjectId
     try:
         order_id_obj = ObjectId(order_id)
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid order ID")
 
-    # Find the order in the database by order_id
-    order = orders_collection.find_one({"_id": order_id_obj})
+    #Find order by id
+    order_by_id = orders_collection.find_one({"_id": order_id_obj})
 
-    if not order:
+    if not order_by_id:
         raise HTTPException(status_code=404, detail="Order not found")
-    return order
+    return order_by_id
 
 @app.post("/orders", response_model=Order)
 async def create_order(order: Order):
-    new_order = order.dict()
-    # Calculate the total amount for order
+    order = jsonable_encoder(order)
+    del order['_id']
+    #Calculate total amount for order
     total_amount = 0
-    for item in order.items:
+    # counter=-1
+    for count, item in enumerate(order['items']):
         try:
-            product_id = ObjectId(item.product_id)  # Convert to ObjectId
+            product_id = ObjectId(item['product_id'])
         except InvalidId:
             raise HTTPException(status_code=400, detail="Invalid product_id")
         
@@ -94,17 +103,31 @@ async def create_order(order: Order):
         
         if not product:
             raise HTTPException(status_code=404, detail="Product not found")
-        total_amount += product["price"] * item.bought_quantity
-        # Update the available_quantity of the product
-        updated_quantity = product["available_quantity"] - item.bought_quantity
+        
+        available_quantity = product["available_quantity"]
+
+        bought_quantity = 0
+        if((available_quantity - item['bought_quantity']) >= 0):
+            bought_quantity = item['bought_quantity']
+        else:
+            bought_quantity = available_quantity
+        
+        total_amount += product["price"] * bought_quantity
+
+        #available_quantity updation
+        updated_quantity = product["available_quantity"] - bought_quantity
         products_collection.update_one(
             {"_id": product_id},
             {"$set": {"available_quantity": updated_quantity}}
         )
-    new_order["total_amount"] = total_amount
+        order['items'][count]['bought_quantity'] = bought_quantity
+        
+    order["total_amount"] = total_amount
 
-    # Insert the order into the MongoDB collection
-    order_id = orders_collection.insert_one(new_order).inserted_id
-    #Return the order
-    created_order = {**new_order, "id": str(order_id)}
+    #order inserted into MongoDB collection
+    new_order = orders_collection.insert_one(order)
+
+    #order returned
+    created_order = orders_collection.find_one({"_id":new_order.inserted_id})
+    created_order['_id'] = created_order['_id']
     return created_order
